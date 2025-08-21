@@ -33,7 +33,25 @@ def seed_default_categories():
             "Perifericos (teclado, mouse, audífonos, etc.). Detalles esperados: "
             "tipo, marca, fecha_registro, fecha_entrega."
         ),
+        (
+            "Access Point",
+            "Puntos de acceso de red. Detalles: ip, mac_address, usuario_admin, contrasena_admin."
+        ),
+        (
+            "Switch",
+            "Conmutadores de red. Detalles: cantidad_puertos, tipo (LAN o WiFi)."
+        ),
+        (
+            "Camara",
+            "Cámaras de seguridad. Detalles: marca, modelo, tipo, patron_utilizado."
+        ),
+        (
+            "DVR",
+            "Grabadores de video digital. Detalles: cantidad_dispositivos_conectados."
+        ),
     ]
+
+
 
     for nombre, descripcion in categorias:
         cur.execute(

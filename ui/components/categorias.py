@@ -204,82 +204,118 @@ class CategoriasWindow:
 
     # ----------------- Baja -----------------
     def delete_categoria(self):
-        selected = self.listbox.curselection()
-        if not selected:
-            messagebox.showwarning("Atención", "Selecciona una categoría para eliminar.")
+        sel = self.listbox.curselection()
+        if not sel:
+            messagebox.showwarning("Atención", "Seleccioná una categoría para eliminar.")
             return
 
-        item = self.listbox.get(selected[0])
-        id_categoria, nombre = item.split(" - ", 1)
-        nombre_lower = nombre.lower()
+        item = self.listbox.get(sel[0])  # "id - nombre"
+        try:
+            id_categoria = int(item.split(" - ")[0])
+            nombre = item.split(" - ", 1)[1]
+        except Exception:
+            messagebox.showerror("Error", "No se pudo obtener la categoría seleccionada.")
+            return
 
-        # Categorías protegidas
-        core_cats = ["computadora", "impresora", "periférico"]
+        nombre_lower = (nombre or "").strip().lower()
+
+        # Categorías protegidas (con y sin tilde)
+        core_cats = ("computadora", "impresora", "periférico", "periferico", "Access Point","Switch", "Camara", "DVR")
         if any(c in nombre_lower for c in core_cats):
-            messagebox.showerror("Bloqueado", f"La categoría '{nombre}' es una categoría base y no puede eliminarse.")
+            messagebox.showerror("Bloqueado", f"La categoría '{nombre}' es base del sistema y no puede eliminarse.")
             return
 
-        # Verificar activos asociados
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM activos WHERE id_categoria = ?", (id_categoria,))
-        activos_count = cur.fetchone()[0]
+        # ¿Tiene assets asociados?
+        conn = get_connection(); cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM assets WHERE id_categoria = ?", (id_categoria,))
+            activos_count = cur.fetchone()[0]
+        except Exception as e:
+            conn.close()
+            messagebox.showerror("Error", f"No se pudo verificar activos asociados: {e}")
+            return
 
         if activos_count > 0:
-            # Popup para reasignación
+            # --- Popup de reasignación ---
+            conn.close()  # cerramos esta conexión; el popup usará una nueva
             popup = tk.Toplevel(self.master)
             popup.title("Reasignar Activos")
-            popup.geometry("400x200")
-            popup.transient(self.master)  # popup siempre sobre ventana principal
-            popup.grab_set()  # foco modal
+            popup.geometry("460x220")
+            popup.transient(self.master)
+            popup.grab_set()
 
-            tk.Label(popup, text=f"La categoría '{nombre}' tiene {activos_count} activos.\nSelecciona otra categoría para reasignarlos:", pady=10).pack()
+            wrap = tk.Frame(popup, padx=12, pady=12)
+            wrap.pack(fill="both", expand=True)
 
-            # Cargar categorías destino
-            cur.execute("SELECT id_categoria, nombre FROM categorias_asset WHERE id_categoria != ?", (id_categoria,))
-            categorias_destino = cur.fetchall()
-            if not categorias_destino:
-                messagebox.showerror("Error", "No hay categorías para reasignar activos.")
-                popup.destroy()
-                conn.close()
+            tk.Label(
+                wrap,
+                text=(f"La categoría '{nombre}' tiene {activos_count} activo(s).\n"
+                    "Seleccioná otra categoría para reasignarlos y poder eliminarla."),
+                justify="left"
+            ).pack(anchor="w", pady=(0,10))
+
+            # Cargar categorías destino (todas menos la actual)
+            conn2 = get_connection(); c2 = conn2.cursor()
+            c2.execute("""
+                SELECT id_categoria, nombre
+                FROM categorias_asset
+                WHERE id_categoria <> ?
+                ORDER BY nombre
+            """, (id_categoria,))
+            destinos = c2.fetchall()
+            conn2.close()
+
+            if not destinos:
+                tk.Label(wrap, text="No hay categorías disponibles para reasignar.", fg="red").pack(anchor="w", pady=8)
+                tk.Button(wrap, text="Cerrar", command=popup.destroy, **BTN_KW).pack(pady=(14,0), fill="x")
                 return
 
-            destino_var = tk.StringVar()
-            combo = tk.OptionMenu(popup, destino_var, *[f"{c[0]} - {c[1]}" for c in categorias_destino])
-            combo.pack(pady=10)
+            from tkinter import ttk
+            tk.Label(wrap, text="Categoría destino:").pack(anchor="w")
+            cb = ttk.Combobox(wrap, state="readonly", width=44,
+                            values=[f"{d[0]} - {d[1]}" for d in destinos])
+            cb.pack(fill="x", pady=(4,10))
+            cb.current(0)
 
             def reasignar_y_eliminar():
-                if not destino_var.get():
-                    messagebox.showwarning("Atención", "Selecciona una categoría destino.")
+                val = cb.get().strip()
+                if not val:
+                    messagebox.showwarning("Atención", "Seleccioná una categoría destino.")
                     return
-                id_destino = destino_var.get().split(" - ")[0]
+                id_destino = int(val.split(" - ")[0])
 
+                conn3 = get_connection(); c3 = conn3.cursor()
                 try:
-                    # Reasignar activos
-                    cur.execute("UPDATE activos SET id_categoria = ? WHERE id_categoria = ?", (id_destino, id_categoria))
-                    # Eliminar categoría original
-                    cur.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
-                    conn.commit()
+                    # Transacción: reasignar y luego eliminar
+                    c3.execute("UPDATE assets SET id_categoria = ? WHERE id_categoria = ?", (id_destino, id_categoria))
+                    c3.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
+                    conn3.commit()
                     messagebox.showinfo("Éxito", f"Activos reasignados y categoría '{nombre}' eliminada.")
                     popup.destroy()
                     self.load_categorias()
                 except Exception as e:
-                    messagebox.showerror("Error", f"No se pudo reasignar: {e}")
+                    conn3.rollback()
+                    messagebox.showerror("Error", f"No se pudo completar la operación: {e}")
                 finally:
-                    conn.close()
+                    conn3.close()
 
-            tk.Button(popup, text="Reasignar y Eliminar", command=reasignar_y_eliminar, **BTN_KW).pack(pady=10, fill="x")
+            tk.Button(wrap, text="Reasignar y eliminar", command=reasignar_y_eliminar, **BTN_KW).pack(fill="x", pady=(4,0))
+            tk.Button(wrap, text="Cancelar", command=popup.destroy).pack(pady=(8,0))
             return
 
-        # Si no tiene activos, eliminar directamente
-        confirm = messagebox.askyesno("Confirmar", f"¿Eliminar categoría '{nombre}'?")
-        if confirm:
-            try:
-                cur.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
-                conn.commit()
-                messagebox.showinfo("Éxito", "Categoría eliminada correctamente.")
-                self.load_categorias()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo eliminar: {e}")
-            finally:
-                conn.close()
+        # Sin assets: eliminación directa
+        if not messagebox.askyesno("Confirmar", f"¿Eliminar la categoría '{nombre}'?"):
+            conn.close()
+            return
+
+        try:
+            cur.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
+            conn.commit()
+            messagebox.showinfo("Éxito", "Categoría eliminada correctamente.")
+            self.load_categorias()
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror("Error", f"No se pudo eliminar: {e}")
+        finally:
+            conn.close()
+

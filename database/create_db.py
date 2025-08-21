@@ -101,6 +101,57 @@ def create_tables():
     )
     """)
 
+    # ACCESS POINT
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS assets_access_points (
+            id_asset         INTEGER PRIMARY KEY,
+            ip               TEXT,
+            mac_address      TEXT,
+            usuario_admin    TEXT,
+            contrasena_admin TEXT,
+            FOREIGN KEY (id_asset) REFERENCES assets(id_asset) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ap_ip ON assets_access_points(ip);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ap_mac ON assets_access_points(mac_address);")
+
+    # SWITCH
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS assets_switches (
+            id_asset         INTEGER PRIMARY KEY,
+            cantidad_puertos INTEGER,
+            tipo             TEXT,   -- sugerido: 'LAN' o 'WiFi'
+            FOREIGN KEY (id_asset) REFERENCES assets(id_asset) ON DELETE CASCADE
+        );
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_switch_tipo ON assets_switches(tipo);")
+
+    ## CÁMARA
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS assets_camaras (
+        id_asset          INTEGER PRIMARY KEY,
+        marca             TEXT,
+        modelo            TEXT,
+        tipo              TEXT,   -- ej: 'IP', 'Analógica', etc.
+        patron_utilizado  TEXT,   -- texto largo (credencial/patrón/observaciones técnicas)
+        FOREIGN KEY (id_asset) REFERENCES assets(id_asset) ON DELETE CASCADE
+    );
+    
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cam_marca_modelo ON assets_camaras(marca, modelo);")
+
+    ## DVR
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS assets_dvrs (
+        id_asset                     INTEGER PRIMARY KEY,
+        cantidad_dispositivos_conectados INTEGER,
+        FOREIGN KEY (id_asset) REFERENCES assets(id_asset) ON DELETE CASCADE
+    )
+    """)
+
     conn.commit()
     conn.close()
     print("✅ Tablas creadas correctamente.")

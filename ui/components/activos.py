@@ -251,6 +251,58 @@ class ActivosWindow:
             if row:
                 details += [("Tipo", row[0] or ""), ("Marca", row[1] or ""),
                             ("Fecha registro", row[2] or ""), ("Fecha entrega", row[3] or "")]
+                
+        elif "access point" in cat_name or "accesspoint" in cat_name or "ap " in cat_name:
+            cur.execute("""
+                SELECT ip, mac_address, usuario_admin, contrasena_admin
+                FROM assets_access_points WHERE id_asset=?
+            """, (id_asset,))
+            row = cur.fetchone()
+            if row:
+                details += [
+                    ("IP", row[0] or ""),
+                    ("MAC Address", row[1] or ""),
+                    ("Usuario admin", row[2] or ""),
+                    ("Contraseña admin", row[3] or ""),
+                ]
+
+        elif "switch" in cat_name:
+            cur.execute("""
+                SELECT cantidad_puertos, tipo
+                FROM assets_switches WHERE id_asset=?
+            """, (id_asset,))
+            row = cur.fetchone()
+            if row:
+                details += [
+                    ("Cantidad de puertos", "" if row[0] is None else str(row[0])),
+                    ("Tipo", row[1] or ""),  # LAN / WiFi
+                ]
+
+        elif "cámara" in cat_name or "camara" in cat_name:
+            cur.execute("""
+                SELECT marca, modelo, tipo, patron_utilizado
+                FROM assets_camaras WHERE id_asset=?
+            """, (id_asset,))
+            row = cur.fetchone()
+            if row:
+                details += [
+                    ("Marca", row[0] or ""),
+                    ("Modelo", row[1] or ""),
+                    ("Tipo", row[2] or ""),
+                    ("Patrón utilizado", row[3] or ""),
+                ]
+
+        elif "dvr" in cat_name:
+            cur.execute("""
+                SELECT cantidad_dispositivos_conectados
+                FROM assets_dvrs WHERE id_asset=?
+            """, (id_asset,))
+            row = cur.fetchone()
+            if row:
+                details += [
+                    ("Cantidad de dispositivos conectados", "" if row[0] is None else str(row[0])),
+                ]
+
         conn.close()
 
         self._show_details_popup(id_asset, categoria, details)
@@ -524,7 +576,7 @@ class ActivosWindow:
 
         # 2) base + detalles para esos IDs
         ids = [r[0] for r in listed_rows]
-        base_rows, comp_map, imp_map, per_map = [], {}, {}, {}
+        base_rows, comp_map, imp_map, per_map, ap_map, sw_map, cam_map, dvr_map = [], {}, {}, {}, {}, {}, {}, {}
 
         if ids:
             qmarks = ",".join(["?"]*len(ids))
@@ -550,14 +602,34 @@ class ActivosWindow:
             cur.execute(f"SELECT id_asset, tipo, marca, fecha_registro, fecha_entrega FROM assets_perifericos WHERE id_asset IN ({qmarks})", ids)
             for r in cur.fetchall():
                 per_map[r[0]] = r[1:]
+            
+            cur.execute(f"""SELECT id_asset, ip, mac_address, usuario_admin, contrasena_admin
+                        FROM assets_access_points WHERE id_asset IN ({qmarks})""", ids)
+            for r in cur.fetchall():
+                ap_map[r[0]] = r[1:]
+
+            cur.execute(f"""SELECT id_asset, cantidad_puertos, tipo
+                            FROM assets_switches WHERE id_asset IN ({qmarks})""", ids)
+            for r in cur.fetchall():
+                sw_map[r[0]] = r[1:]
+
+            cur.execute(f"""SELECT id_asset, marca, modelo, tipo, patron_utilizado
+                            FROM assets_camaras WHERE id_asset IN ({qmarks})""", ids)
+            for r in cur.fetchall():
+                cam_map[r[0]] = r[1:]
+
+            cur.execute(f"""SELECT id_asset, cantidad_dispositivos_conectados
+                            FROM assets_dvrs WHERE id_asset IN ({qmarks})""", ids)
+            for r in cur.fetchall():
+                dvr_map[r[0]] = r[1:]
 
         conn.close()
-        return listed_rows, base_rows, comp_map, imp_map, per_map
+        return listed_rows, base_rows, comp_map, imp_map, per_map, ap_map, sw_map, cam_map, dvr_map
 
        
     def export_excel(self):
         # 1) Tomar filtros y datos de la vista actual
-        listed_rows, base_rows, comp_map, imp_map, per_map = self._fetch_filtered_assets()
+        listed_rows, base_rows, comp_map, imp_map, per_map, ap_map, sw_map, cam_map, dvr_map = self._fetch_filtered_assets()
         if not listed_rows:
             messagebox.showinfo("Exportar", "No hay datos para exportar con los filtros actuales.")
             return
@@ -592,6 +664,23 @@ class ActivosWindow:
             detail_headers = ["tipo", "marca", "fecha_registro", "fecha_entrega"]
             detail_map = per_map
             sheet_title = "Perifericos"
+        
+        elif "access point" in cat_name_l or "accesspoint" in cat_name_l or "ap " in cat_name_l:
+            detail_headers = ["ip", "mac_address", "usuario_admin", "contrasena_admin"]
+            detail_map = ap_map; sheet_title = "AccessPoints"
+
+        elif "switch" in cat_name_l:
+            detail_headers = ["cantidad_puertos", "tipo"]
+            detail_map = sw_map; sheet_title = "Switches"
+
+        elif "cámara" in cat_name_l or "camara" in cat_name_l:
+            detail_headers = ["marca", "modelo", "tipo", "patron_utilizado"]
+            detail_map = cam_map; sheet_title = "Camaras"
+
+        elif "dvr" in cat_name_l:
+            detail_headers = ["cantidad_dispositivos_conectados"]
+            detail_map = dvr_map; sheet_title = "DVRs"
+
         else:
             # Categoría sin tabla específica -> solo base
             detail_headers = []
@@ -694,11 +783,19 @@ class ActivosWindow:
             self._edit_computadora_details(id_asset)
         elif "impresora" in cat:
             self._edit_impresora_details(id_asset)
-        elif "perifer" in cat:  # periférico
+        elif "perifer" in cat:
             self._edit_periferico_details(id_asset)
+        elif "access point" in cat or "accesspoint" in cat or "ap " in cat:
+            self._edit_access_point_details(id_asset)
+        elif "switch" in cat:
+            self._edit_switch_details(id_asset)
+        elif "cámara" in cat or "camara" in cat:
+            self._edit_camara_details(id_asset)
+        elif "dvr" in cat:
+            self._edit_dvr_details(id_asset)
         else:
             messagebox.showinfo("Detalles", "Esta categoría no tiene detalles específicos.")
-            return
+
 
 # ---------- COMPUTADORA ----------
     def _edit_computadora_details(self, id_asset: int):
@@ -892,3 +989,333 @@ class ActivosWindow:
             messagebox.showinfo("Éxito", "Detalles guardados.")
 
         tk.Button(pop, text="Guardar", width=16, height=2, command=save).pack(pady=12)
+
+    # ---------------ACCESS POINTS---------------
+    def _edit_ap_details(parent, id_asset, on_saved=None, current_user_id=None):
+        """Editor de detalles para Access Point."""
+        pop = tk.Toplevel(parent)
+        pop.title(f"Detalles · Access Point (Asset #{id_asset})")
+        pop.geometry("520x360")
+        pop.resizable(False, False)
+        try:
+            pop.transient(parent); pop.grab_set()
+        except Exception:
+            pass
+
+        wrap = tk.Frame(pop, padx=12, pady=12)
+        wrap.pack(fill="both", expand=True)
+
+        # Campos
+        labels = ["IP", "MAC Address", "Usuario admin", "Contraseña admin"]
+        entries = []
+
+        for i, lbl in enumerate(labels):
+            tk.Label(wrap, text=lbl + ":", anchor="w").pack(anchor="w", pady=(8 if i == 0 else 4, 0))
+            show = "" if lbl != "Contraseña admin" else "*"  # ocultar contraseña
+            e = tk.Entry(wrap, width=52, show=show)
+            e.pack()
+            entries.append(e)
+
+        # Cargar existentes
+        conn = get_connection(); cur = conn.cursor()
+        cur.execute("""
+            SELECT ip, mac_address, usuario_admin, contrasena_admin
+            FROM assets_access_points
+            WHERE id_asset=?
+        """, (id_asset,))
+        row = cur.fetchone()
+        conn.close()
+
+        if row:
+            for e, v in zip(entries, row):
+                e.insert(0, "" if v is None else str(v))
+
+        def save():
+            ip = entries[0].get().strip() or None
+            mac = entries[1].get().strip() or None
+            usr = entries[2].get().strip() or None
+            pwd = entries[3].get().strip() or None
+
+            conn2 = get_connection(); c2 = conn2.cursor()
+            try:
+                c2.execute("SELECT 1 FROM assets_access_points WHERE id_asset=?", (id_asset,))
+                exists = c2.fetchone() is not None
+                if exists:
+                    c2.execute("""
+                        UPDATE assets_access_points
+                        SET ip=?, mac_address=?, usuario_admin=?, contrasena_admin=?
+                        WHERE id_asset=?
+                    """, (ip, mac, usr, pwd, id_asset))
+                else:
+                    c2.execute("""
+                        INSERT INTO assets_access_points (id_asset, ip, mac_address, usuario_admin, contrasena_admin)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (id_asset, ip, mac, usr, pwd))
+                conn2.commit()
+            except Exception as e:
+                conn2.rollback()
+                messagebox.showerror("Error", f"No se pudo guardar: {e}")
+                return
+            finally:
+                conn2.close()
+
+            if current_user_id:
+                try:
+                    log_historial(id_asset, current_user_id, "Actualización de detalles (Access Point)")
+                except Exception:
+                    pass
+
+            if on_saved:
+                on_saved()
+
+            messagebox.showinfo("Éxito", "Detalles guardados.")
+            pop.destroy()
+
+        tk.Button(wrap, text="Guardar", command=save, **BTN_KW).pack(pady=12, fill="x")
+
+# ---------------SWITCH---------------     
+def _edit_switch_details(parent, id_asset, on_saved=None, current_user_id=None):
+    """Editor de detalles para Switch."""
+    pop = tk.Toplevel(parent)
+    pop.title(f"Detalles · Switch (Asset #{id_asset})")
+    pop.geometry("520x300")
+    pop.resizable(False, False)
+    try:
+        pop.transient(parent); pop.grab_set()
+    except Exception:
+        pass
+
+    wrap = tk.Frame(pop, padx=12, pady=12)
+    wrap.pack(fill="both", expand=True)
+
+    # Campos
+    tk.Label(wrap, text="Cantidad de puertos:", anchor="w").pack(anchor="w", pady=(8, 0))
+    e_puertos = tk.Entry(wrap, width=52); e_puertos.pack()
+
+    tk.Label(wrap, text="Tipo (LAN o WiFi):", anchor="w").pack(anchor="w", pady=(8, 0))
+    e_tipo = tk.Entry(wrap, width=52); e_tipo.pack()
+
+    # Cargar existentes
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT cantidad_puertos, tipo
+        FROM assets_switches
+        WHERE id_asset=?
+    """, (id_asset,))
+    row = cur.fetchone()
+    conn.close()
+
+    if row:
+        e_puertos.insert(0, "" if row[0] is None else str(row[0]))
+        e_tipo.insert(0, row[1] or "")
+
+    def save():
+        raw_puertos = e_puertos.get().strip()
+        tipo = e_tipo.get().strip() or None
+
+        puertos = None
+        if raw_puertos:
+            try:
+                puertos = int(raw_puertos)
+            except ValueError:
+                messagebox.showerror("Error", "Cantidad de puertos debe ser un número entero.")
+                return
+
+        conn2 = get_connection(); c2 = conn2.cursor()
+        try:
+            c2.execute("SELECT 1 FROM assets_switches WHERE id_asset=?", (id_asset,))
+            exists = c2.fetchone() is not None
+            if exists:
+                c2.execute("""
+                    UPDATE assets_switches
+                    SET cantidad_puertos=?, tipo=?
+                    WHERE id_asset=?
+                """, (puertos, tipo, id_asset))
+            else:
+                c2.execute("""
+                    INSERT INTO assets_switches (id_asset, cantidad_puertos, tipo)
+                    VALUES (?, ?, ?)
+                """, (id_asset, puertos, tipo))
+            conn2.commit()
+        except Exception as e:
+            conn2.rollback()
+            messagebox.showerror("Error", f"No se pudo guardar: {e}")
+            return
+        finally:
+            conn2.close()
+
+        if current_user_id:
+            try:
+                log_historial(id_asset, current_user_id, "Actualización de detalles (Switch)")
+            except Exception:
+                pass
+
+        if on_saved:
+            on_saved()
+
+        messagebox.showinfo("Éxito", "Detalles guardados.")
+        pop.destroy()
+
+    tk.Button(wrap, text="Guardar", command=save, **BTN_KW).pack(pady=12, fill="x")
+
+    def _edit_camara_details(parent, id_asset, on_saved=None, current_user_id=None):
+        # """Editor de detalles para Cámara."""
+        pop = tk.Toplevel(parent)
+        pop.title(f"Detalles · Cámara (Asset #{id_asset})")
+        pop.geometry("520x440")
+        pop.resizable(False, False)
+        try:
+            pop.transient(parent); pop.grab_set()
+        except Exception:
+            pass
+
+        wrap = tk.Frame(pop, padx=12, pady=12)
+        wrap.pack(fill="both", expand=True)
+
+        # Campos
+        tk.Label(wrap, text="Marca:").pack(anchor="w", pady=(6, 0))
+        e_marca = tk.Entry(wrap, width=52); e_marca.pack()
+
+        tk.Label(wrap, text="Modelo:").pack(anchor="w", pady=(6, 0))
+        e_modelo = tk.Entry(wrap, width=52); e_modelo.pack()
+
+        tk.Label(wrap, text="Tipo:").pack(anchor="w", pady=(6, 0))
+        e_tipo = tk.Entry(wrap, width=52); e_tipo.pack()
+
+        tk.Label(wrap, text="Patrón utilizado (texto largo):").pack(anchor="w", pady=(8, 0))
+        t_patron = tk.Text(wrap, width=52, height=6); t_patron.pack()
+
+        # Cargar existentes
+        conn = get_connection(); cur = conn.cursor()
+        cur.execute("""
+            SELECT marca, modelo, tipo, patron_utilizado
+            FROM assets_camaras
+            WHERE id_asset=?
+        """, (id_asset,))
+        row = cur.fetchone()
+        conn.close()
+
+        if row:
+            e_marca.insert(0, "" if row[0] is None else str(row[0]))
+            e_modelo.insert(0, "" if row[1] is None else str(row[1]))
+            e_tipo.insert(0, "" if row[2] is None else str(row[2]))
+            t_patron.insert("1.0", "" if row[3] is None else str(row[3]))
+
+        def save():
+            marca = e_marca.get().strip() or None
+            modelo = e_modelo.get().strip() or None
+            tipo = e_tipo.get().strip() or None
+            patron = t_patron.get("1.0", "end").strip() or None
+
+            conn2 = get_connection(); c2 = conn2.cursor()
+            try:
+                c2.execute("SELECT 1 FROM assets_camaras WHERE id_asset=?", (id_asset,))
+                exists = c2.fetchone() is not None
+                if exists:
+                    c2.execute("""
+                        UPDATE assets_camaras
+                        SET marca=?, modelo=?, tipo=?, patron_utilizado=?
+                        WHERE id_asset=?
+                    """, (marca, modelo, tipo, patron, id_asset))
+                else:
+                    c2.execute("""
+                        INSERT INTO assets_camaras (id_asset, marca, modelo, tipo, patron_utilizado)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (id_asset, marca, modelo, tipo, patron))
+                conn2.commit()
+            except Exception as e:
+                conn2.rollback()
+                messagebox.showerror("Error", f"No se pudo guardar: {e}")
+                return
+            finally:
+                conn2.close()
+
+            if current_user_id:
+                try:
+                    log_historial(id_asset, current_user_id, "Actualización de detalles (Cámara)")
+                except Exception:
+                    pass
+
+            if on_saved:
+                on_saved()
+            messagebox.showinfo("Éxito", "Detalles guardados.")
+            pop.destroy()
+
+    tk.Button(wrap, text="Guardar", command=save, **BTN_KW).pack(pady=12, fill="x")
+
+    
+def _edit_dvr_details(parent, id_asset, on_saved=None, current_user_id=None):
+    """Editor de detalles para DVR."""
+    pop = tk.Toplevel(parent)
+    pop.title(f"Detalles · DVR (Asset #{id_asset})")
+    pop.geometry("520x240")
+    pop.resizable(False, False)
+    try:
+        pop.transient(parent); pop.grab_set()
+    except Exception:
+        pass
+
+    wrap = tk.Frame(pop, padx=12, pady=12)
+    wrap.pack(fill="both", expand=True)
+
+    tk.Label(wrap, text="Cantidad de dispositivos conectados:").pack(anchor="w", pady=(8, 0))
+    e_cant = tk.Entry(wrap, width=52); e_cant.pack()
+
+    # Cargar existentes
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT cantidad_dispositivos_conectados
+        FROM assets_dvrs
+        WHERE id_asset=?
+    """, (id_asset,))
+    row = cur.fetchone()
+    conn.close()
+
+    if row:
+        e_cant.insert(0, "" if row[0] is None else str(row[0]))
+
+    def save():
+        raw = e_cant.get().strip()
+        cant = None
+        if raw:
+            try:
+                cant = int(raw)
+            except ValueError:
+                messagebox.showerror("Error", "La cantidad debe ser un número entero.")
+                return
+
+        conn2 = get_connection(); c2 = conn2.cursor()
+        try:
+            c2.execute("SELECT 1 FROM assets_dvrs WHERE id_asset=?", (id_asset,))
+            exists = c2.fetchone() is not None
+            if exists:
+                c2.execute("""
+                    UPDATE assets_dvrs
+                    SET cantidad_dispositivos_conectados=?
+                    WHERE id_asset=?
+                """, (cant, id_asset))
+            else:
+                c2.execute("""
+                    INSERT INTO assets_dvrs (id_asset, cantidad_dispositivos_conectados)
+                    VALUES (?, ?)
+                """, (id_asset, cant))
+            conn2.commit()
+        except Exception as e:
+            conn2.rollback()
+            messagebox.showerror("Error", f"No se pudo guardar: {e}")
+            return
+        finally:
+            conn2.close()
+
+        if current_user_id:
+            try:
+                log_historial(id_asset, current_user_id, "Actualización de detalles (DVR)")
+            except Exception:
+                pass
+
+        if on_saved:
+            on_saved()
+        messagebox.showinfo("Éxito", "Detalles guardados.")
+        pop.destroy()
+
+    tk.Button(wrap, text="Guardar", command=save, **BTN_KW).pack(pady=12, fill="x")
