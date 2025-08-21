@@ -41,8 +41,7 @@ def create_tables():
     CREATE TABLE IF NOT EXISTS assets (
         id_asset INTEGER PRIMARY KEY AUTOINCREMENT,
         id_categoria INTEGER NOT NULL,
-        nombre TEXT NOT NULL,
-        identificador TEXT,
+        nombre TEXT NOT NULL,       
         fecha_alta TEXT,
         fecha_baja TEXT,
         ubicacion TEXT,

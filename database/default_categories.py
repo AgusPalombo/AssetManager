@@ -21,16 +21,16 @@ def seed_default_categories():
     categorias = [
         (
             "Computadora",
-            "Activos de cómputo (desktop/notebook). Detalles esperados: "
+            "Activos de computo (desktop/notebook). Detalles esperados: "
             "ip, motherboard, procesador, ram_tipo, ram_cantidad, ssd, hdd, placa_red_ext."
         ),
         (
             "Impresora",
-            "Equipos de impresión. Detalles esperados: marca, modelo, nro_serie, ip."
+            "Equipos de impresion. Detalles esperados: marca, modelo, nro_serie, ip."
         ),
         (
-            "Periférico",
-            "Periféricos (teclado, mouse, audífonos, etc.). Detalles esperados: "
+            "Periferico",
+            "Perifericos (teclado, mouse, audífonos, etc.). Detalles esperados: "
             "tipo, marca, fecha_registro, fecha_entrega."
         ),
     ]

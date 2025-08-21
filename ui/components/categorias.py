@@ -204,43 +204,82 @@ class CategoriasWindow:
 
     # ----------------- Baja -----------------
     def delete_categoria(self):
-        """Elimina la categoría seleccionada (solo admin)"""
-        if self.current_role != "admin":
-            messagebox.showerror("Permisos", "No tenés permisos para eliminar categorías.")
+        selected = self.listbox.curselection()
+        if not selected:
+            messagebox.showwarning("Atención", "Selecciona una categoría para eliminar.")
             return
 
-        id_categoria = self._get_selected_categoria()
-        if id_categoria is None:
+        item = self.listbox.get(selected[0])
+        id_categoria, nombre = item.split(" - ", 1)
+        nombre_lower = nombre.lower()
+
+        # Categorías protegidas
+        core_cats = ["computadora", "impresora", "periférico"]
+        if any(c in nombre_lower for c in core_cats):
+            messagebox.showerror("Bloqueado", f"La categoría '{nombre}' es una categoría base y no puede eliminarse.")
             return
 
-        # Chequeo: ¿tiene activos asociados?
+        # Verificar activos asociados
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM assets WHERE id_categoria = ?", (id_categoria,))
-        count_assets = cur.fetchone()[0]
-        conn.close()
+        cur.execute("SELECT COUNT(*) FROM activos WHERE id_categoria = ?", (id_categoria,))
+        activos_count = cur.fetchone()[0]
 
-        if count_assets > 0:
-            messagebox.showwarning(
-                "Atención",
-                f"La categoría tiene {count_assets} activo(s) asociado(s).\n"
-                "No se recomienda eliminarla. Reasigná los activos antes de borrar."
-            )
-            # Si querés bloquear estrictamente:
-            # return
+        if activos_count > 0:
+            # Popup para reasignación
+            popup = tk.Toplevel(self.master)
+            popup.title("Reasignar Activos")
+            popup.geometry("400x200")
+            popup.transient(self.master)  # popup siempre sobre ventana principal
+            popup.grab_set()  # foco modal
 
-        item_text = next((self.listbox.get(i) for i in self.listbox.curselection()), f"{id_categoria}")
-        if not messagebox.askyesno("Confirmar", f"¿Eliminar categoría {item_text}?"):
+            tk.Label(popup, text=f"La categoría '{nombre}' tiene {activos_count} activos.\nSelecciona otra categoría para reasignarlos:", pady=10).pack()
+
+            # Cargar categorías destino
+            cur.execute("SELECT id_categoria, nombre FROM categorias_asset WHERE id_categoria != ?", (id_categoria,))
+            categorias_destino = cur.fetchall()
+            if not categorias_destino:
+                messagebox.showerror("Error", "No hay categorías para reasignar activos.")
+                popup.destroy()
+                conn.close()
+                return
+
+            destino_var = tk.StringVar()
+            combo = tk.OptionMenu(popup, destino_var, *[f"{c[0]} - {c[1]}" for c in categorias_destino])
+            combo.pack(pady=10)
+
+            def reasignar_y_eliminar():
+                if not destino_var.get():
+                    messagebox.showwarning("Atención", "Selecciona una categoría destino.")
+                    return
+                id_destino = destino_var.get().split(" - ")[0]
+
+                try:
+                    # Reasignar activos
+                    cur.execute("UPDATE activos SET id_categoria = ? WHERE id_categoria = ?", (id_destino, id_categoria))
+                    # Eliminar categoría original
+                    cur.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
+                    conn.commit()
+                    messagebox.showinfo("Éxito", f"Activos reasignados y categoría '{nombre}' eliminada.")
+                    popup.destroy()
+                    self.load_categorias()
+                except Exception as e:
+                    messagebox.showerror("Error", f"No se pudo reasignar: {e}")
+                finally:
+                    conn.close()
+
+            tk.Button(popup, text="Reasignar y Eliminar", command=reasignar_y_eliminar, **BTN_KW).pack(pady=10, fill="x")
             return
 
-        conn = get_connection()
-        cur = conn.cursor()
-        try:
-            cur.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
-            conn.commit()
-            messagebox.showinfo("Éxito", "Categoría eliminada correctamente.")
-            self.load_categorias()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo eliminar: {e}")
-        finally:
-            conn.close()
+        # Si no tiene activos, eliminar directamente
+        confirm = messagebox.askyesno("Confirmar", f"¿Eliminar categoría '{nombre}'?")
+        if confirm:
+            try:
+                cur.execute("DELETE FROM categorias_asset WHERE id_categoria = ?", (id_categoria,))
+                conn.commit()
+                messagebox.showinfo("Éxito", "Categoría eliminada correctamente.")
+                self.load_categorias()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo eliminar: {e}")
+            finally:
+                conn.close()

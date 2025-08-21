@@ -162,9 +162,9 @@ class ActivosWindow:
         elif self.active_state_filter == "Baja":
             where.append("(a.fecha_baja IS NOT NULL AND a.fecha_baja <> '')")
 
-        # Filtro por texto (nombre, identificador, ubicación)
+        # Filtro por texto (nombre, ubicación)
         if self.active_text_filter:
-            where.append("(a.nombre LIKE ? OR a.identificador LIKE ? OR a.ubicacion LIKE ?)")
+            where.append("(a.nombre LIKE ? OR a.ubicacion LIKE ?)")
             wild = f"%{self.active_text_filter}%"
             params.extend([wild, wild, wild])
 
@@ -208,15 +208,14 @@ class ActivosWindow:
         details = []
         conn = get_connection(); cur = conn.cursor()
         cur.execute("""
-            SELECT id_asset, nombre, identificador, fecha_alta, fecha_baja, ubicacion, observaciones
+            SELECT id_asset, nombre, fecha_alta, fecha_baja, ubicacion, observaciones
             FROM assets WHERE id_asset=?
         """, (id_asset,))
         gen = cur.fetchone()
         if gen:
-            _, g_nombre, g_ident, g_falta, g_fbaja, g_ubi, g_obs = gen
+            _, g_nombre, g_falta, g_fbaja, g_ubi, g_obs = gen
             details.extend([
-                ("Nombre", g_nombre or ""), ("Identificador", g_ident or ""),
-                ("Fecha alta", g_falta or ""), ("Fecha baja", g_fbaja or ""),
+                ("Nombre", g_nombre or ""), ("Fecha alta", g_falta or ""), ("Fecha baja", g_fbaja or ""),
                 ("Ubicación", g_ubi or ""), ("Observaciones", g_obs or "")
             ])
 
@@ -295,9 +294,6 @@ class ActivosWindow:
         tk.Label(popup, text="Nombre:").pack(pady=5, anchor="w")
         e_nombre = tk.Entry(popup, width=52); e_nombre.pack()
 
-        tk.Label(popup, text="Identificador:").pack(pady=5, anchor="w")
-        e_ident = tk.Entry(popup, width=52); e_ident.pack()
-
         tk.Label(popup, text="Ubicación:").pack(pady=5, anchor="w")
         e_ubi = tk.Entry(popup, width=52); e_ubi.pack()
 
@@ -320,7 +316,6 @@ class ActivosWindow:
                 messagebox.showerror("Error", "Nombre y Categoría son obligatorios")
                 return
 
-            identificador = e_ident.get().strip()
             ubicacion = e_ubi.get().strip()
             obs = e_obs.get().strip()
             id_categoria = int(cat_value.split(" - ")[0])
@@ -328,9 +323,9 @@ class ActivosWindow:
 
             conn = get_connection(); cur = conn.cursor()
             cur.execute("""
-                INSERT INTO assets (id_categoria, nombre, identificador, fecha_alta, ubicacion, observaciones)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (id_categoria, nombre, identificador, fecha_alta, ubicacion, obs))
+                INSERT INTO assets (id_categoria, nombre, fecha_alta, ubicacion, observaciones)
+                VALUES (?, ?, ?, ?, ?)
+            """, (id_categoria, nombre, fecha_alta, ubicacion, obs))
             conn.commit()
             new_id = cur.lastrowid
 
@@ -391,29 +386,63 @@ class ActivosWindow:
 
         tk.Button(popup, text="Guardar cambios", width=18, height=2, command=save_changes).pack(pady=12)
 
+
     # Dar de baja activo
 
     def baja_activo(self):
-        selected = self._get_selected()
-        if not selected: return
-        id_asset, nombre, categoria, ubicacion, estado = selected
+        sel = self._get_selected()
+        if not sel:
+            return
+        id_asset, nombre, categoria, ubicacion, estado = sel
+
+        # Toggle: si está en Baja, pasa a Alta; si está Activo, pasa a Baja
         if estado == "Baja":
-            messagebox.showinfo("Info", "El activo ya está dado de baja.")
+            # Confirmar ALTA
+            if not messagebox.askyesno("Confirmar", f"¿Dar de ALTA nuevamente el activo {id_asset} - '{nombre}'?"):
+                return
+            conn = get_connection(); cur = conn.cursor()
+            try:
+                cur.execute("UPDATE assets SET fecha_baja=NULL WHERE id_asset=?", (id_asset,))
+                if cur.rowcount == 0:
+                    raise RuntimeError("No se encontró el activo para actualizar.")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                messagebox.showerror("Error", f"No se pudo dar de alta: {e}")
+                return
+            finally:
+                conn.close()
+
+            if self.current_user_id:
+                log_historial(id_asset, self.current_user_id, f"Reactivación (ALTA) del activo '{nombre}'")
+            self.load_activos()
+            messagebox.showinfo("Éxito", f"Activo #{id_asset} dado de ALTA.")
             return
 
-        if not messagebox.askyesno("Confirmar", f"¿Dar de baja el activo {id_asset} - '{nombre}'?"):
+        # Si estaba Activo, pasa a Baja
+        if not messagebox.askyesno("Confirmar", f"¿Dar de BAJA el activo {id_asset} - '{nombre}'?"):
             return
 
-        fecha_baja = datetime.date.today().isoformat()
+        fecha_baja = date.today().isoformat()
         conn = get_connection(); cur = conn.cursor()
-        cur.execute("UPDATE assets SET fecha_baja=? WHERE id_asset=?", (fecha_baja, id_asset))
-        conn.commit(); conn.close()
+        try:
+            cur.execute("UPDATE assets SET fecha_baja=? WHERE id_asset=?", (fecha_baja, id_asset))
+            if cur.rowcount == 0:
+                raise RuntimeError("No se encontró el activo para actualizar.")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror("Error", f"No se pudo dar de baja: {e}")
+            return
+        finally:
+            conn.close()
 
         if self.current_user_id:
             log_historial(id_asset, self.current_user_id, f"Baja del activo '{nombre}' (fecha_baja={fecha_baja})")
 
         self.load_activos()
-        messagebox.showinfo("Éxito", "Activo dado de baja.")
+        messagebox.showinfo("Éxito", f"Activo #{id_asset} dado de BAJA.")
+
 
     # Delete Activo
 
@@ -455,7 +484,7 @@ class ActivosWindow:
         """
         Devuelve:
         - listed_rows: (id_asset, nombre, categoria, ubicacion, estado) según filtros actuales
-        - base_rows:   (id_asset, id_categoria, categoria, nombre, identificador, fecha_alta, fecha_baja, ubicacion, observaciones)
+        - base_rows:   (id_asset, id_categoria, categoria, nombre, fecha_alta, fecha_baja, ubicacion, observaciones)
         - comp_map:    {id_asset: (ip, motherboard, procesador, ram_tipo, ram_cantidad, ssd, hdd, placa_red_ext)}
         - imp_map:     {id_asset: (marca, modelo, nro_serie, ip)}
         - per_map:     {id_asset: (tipo, marca, fecha_registro, fecha_entrega)}
@@ -483,7 +512,7 @@ class ActivosWindow:
         txt = getattr(self, "active_text_filter", "").strip()
         if txt:
             like = f"%{txt}%"
-            where.append("(a.nombre LIKE ? OR a.identificador LIKE ? OR a.ubicacion LIKE ?)")
+            where.append("(a.nombre LIKE ? OR a.ubicacion LIKE ?)")
             params.extend([like, like, like])
 
         if where:
@@ -501,7 +530,7 @@ class ActivosWindow:
             qmarks = ",".join(["?"]*len(ids))
 
             cur.execute(f"""
-                SELECT a.id_asset, a.id_categoria, c.nombre AS categoria, a.nombre, a.identificador,
+                SELECT a.id_asset, a.id_categoria, c.nombre AS categoria, a.nombre,
                     a.fecha_alta, a.fecha_baja, a.ubicacion, a.observaciones
                 FROM assets a
                 LEFT JOIN categorias_asset c ON c.id_categoria = a.id_categoria
@@ -549,8 +578,7 @@ class ActivosWindow:
 
         # 3) Definir columnas base + específicas según la categoría
         base_headers = [
-            "id_asset", "categoria", "nombre", "identificador",
-            "fecha_alta", "fecha_baja", "ubicacion", "observaciones", "estado"
+            "id_asset", "categoria", "nombre", "fecha_alta", "fecha_baja", "ubicacion", "observaciones", "estado"
         ]
         if "computadora" in cat_name_l:
             detail_headers = ["ip", "motherboard", "procesador", "ram_tipo", "ram_cantidad", "ssd", "hdd", "placa_red_ext"]
@@ -572,7 +600,7 @@ class ActivosWindow:
 
         # 4) Construir filas: solo los IDs que están en el listado filtrado
         ids_listados = [r[0] for r in listed_rows]
-        base_map = {r[0]: r for r in base_rows}  # (id_asset, id_categoria, categoria, nombre, identificador, fecha_alta, fecha_baja, ubicacion, observaciones)
+        base_map = {r[0]: r for r in base_rows}  # (id_asset, id_categoria, categoria, nombre, fecha_alta, fecha_baja, ubicacion, observaciones)
 
         def estado_from_base(row):
             # fecha_baja en pos 6
